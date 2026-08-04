@@ -67,11 +67,11 @@ class User extends Authenticatable
     }
 
     /**
-     * Get tickets created by this user (Service Desk).
+     * Get tickets created by this user.
      */
     public function createdTickets()
     {
-        return $this->hasMany(Ticket::class, 'created_by_id');
+        return $this->hasMany(Ticket::class, 'user_id');
     }
 
     /**
