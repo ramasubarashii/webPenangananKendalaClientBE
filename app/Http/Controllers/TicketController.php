@@ -68,8 +68,13 @@ class TicketController extends Controller
         return response()->json($ticket->load(['creator', 'progressLogs']), 201);
     }
 
-    public function show(Request $request, Ticket $ticket)
+    public function show(Request $request, $id)
     {
+        $ticket = Ticket::where('ticket_id', $id)->first();
+        if (! $ticket) {
+            return response()->json(['message' => 'Tiket tidak ditemukan'], 404);
+        }
+
         $user = $request->user();
 
         // Strict access check for Programmer
@@ -86,8 +91,13 @@ class TicketController extends Controller
         return response()->json($ticket->load(['creator', 'assignments.programmer', 'assignments.pm', 'progressLogs.user']));
     }
 
-    public function assign(Request $request, Ticket $ticket)
+    public function assign(Request $request, $id)
     {
+        $ticket = Ticket::where('ticket_id', $id)->first();
+        if (! $ticket) {
+            return response()->json(['message' => 'Tiket tidak ditemukan'], 404);
+        }
+
         // Only PM
         if ($request->user()->role !== 'project_manager') {
             return response()->json(['message' => 'Only Project Managers can assign resources.'], 403);
@@ -132,8 +142,13 @@ class TicketController extends Controller
         ]);
     }
 
-    public function updateStatus(Request $request, Ticket $ticket)
+    public function updateStatus(Request $request, $id)
     {
+        $ticket = Ticket::where('ticket_id', $id)->first();
+        if (! $ticket) {
+            return response()->json(['message' => 'Tiket tidak ditemukan'], 404);
+        }
+
         $user = $request->user();
 
         $request->validate([

@@ -77,6 +77,9 @@ class TicketRbacTest extends TestCase
 
         $response->assertStatus(201);
         $this->assertDatabaseHas('tickets', ['title' => 'Test Ticket']);
+        
+        $createdTicket = Ticket::where('title', 'Test Ticket')->first();
+        $this->assertMatchesRegularExpression('/^TCK-\d{6}-\d{4}$/', $createdTicket->ticket_id);
 
         // Programmer trying to create ticket
         $response2 = $this->actingAs($this->programmer)
@@ -102,7 +105,7 @@ class TicketRbacTest extends TestCase
 
         // Service Desk trying to assign
         $response = $this->actingAs($this->serviceDesk)
-            ->postJson("/api/tickets/{$ticket->id}/assign", [
+            ->postJson("/api/tickets/{$ticket->ticket_id}/assign", [
                 'programmer_id' => $this->programmer->id,
                 'estimated_hours' => 5
             ]);
@@ -110,7 +113,7 @@ class TicketRbacTest extends TestCase
 
         // PM assigns
         $response2 = $this->actingAs($this->pm)
-            ->postJson("/api/tickets/{$ticket->id}/assign", [
+            ->postJson("/api/tickets/{$ticket->ticket_id}/assign", [
                 'programmer_id' => $this->programmer->id,
                 'estimated_hours' => 4.5
             ]);
@@ -144,7 +147,7 @@ class TicketRbacTest extends TestCase
 
         // Other programmer tries to start it -> should fail
         $response = $this->actingAs($this->otherProgrammer)
-            ->postJson("/api/tickets/{$ticket->id}/status", [
+            ->postJson("/api/tickets/{$ticket->ticket_id}/status", [
                 'status' => 'in_progress',
                 'notes' => 'Starting analysis'
             ]);
@@ -152,7 +155,7 @@ class TicketRbacTest extends TestCase
 
         // Assigned programmer starts it -> should succeed
         $response2 = $this->actingAs($this->programmer)
-            ->postJson("/api/tickets/{$ticket->id}/status", [
+            ->postJson("/api/tickets/{$ticket->ticket_id}/status", [
                 'status' => 'in_progress',
                 'notes' => 'Starting analysis'
             ]);

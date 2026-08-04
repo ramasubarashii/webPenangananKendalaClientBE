@@ -14,35 +14,53 @@ class DatabaseSeeder extends Seeder
     public function run(): void
     {
         // Service Desk
-        User::create([
-            'name' => 'Service Desk Admin',
-            'email' => 'servicedesk@example.com',
-            'password' => Hash::make('password'),
-            'role' => 'service_desk',
-        ]);
+        User::firstOrCreate(
+            ['email' => 'servicedesk@example.com'],
+            [
+                'name' => 'Service Desk Admin',
+                'password' => Hash::make('password'),
+                'role' => 'service_desk',
+            ]
+        );
 
         // Project Manager
-        User::create([
-            'name' => 'Project Manager Alpha',
-            'email' => 'pm@example.com',
-            'password' => Hash::make('password'),
-            'role' => 'project_manager',
-        ]);
+        User::firstOrCreate(
+            ['email' => 'pm@example.com'],
+            [
+                'name' => 'Project Manager Alpha',
+                'password' => Hash::make('password'),
+                'role' => 'project_manager',
+            ]
+        );
 
-        // Programmer
-        User::create([
-            'name' => 'Programmer Dev One',
-            'email' => 'programmer@example.com',
-            'password' => Hash::make('password'),
-            'role' => 'programmer',
-        ]);
+        // Programmer One
+        User::firstOrCreate(
+            ['email' => 'programmer@example.com'],
+            [
+                'name' => 'Programmer Dev One',
+                'password' => Hash::make('password'),
+                'role' => 'programmer',
+            ]
+        );
+
+        // Programmer Two
+        User::firstOrCreate(
+            ['email' => 'programmer2@gmail.com'],
+            [
+                'name' => 'Programmer Dev Two',
+                'password' => Hash::make('password'),
+                'role' => 'programmer',
+            ]
+        );
 
         // Owner
-        User::create([
-            'name' => 'Company Owner',
-            'email' => 'owner@example.com',
-            'password' => Hash::make('password'),
-            'role' => 'owner',
-        ]);
+        User::firstOrCreate(
+            ['email' => 'owner@example.com'],
+            [
+                'name' => 'Company Owner',
+                'password' => Hash::make('password'),
+                'role' => 'owner',
+            ]
+        );
     }
 }
