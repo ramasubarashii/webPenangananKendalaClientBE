@@ -19,6 +19,13 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/tickets', [TicketController::class, 'store'])->middleware('role:service_desk');
     Route::get('/tickets/{ticket}', [TicketController::class, 'show']);
     
+    // Client tickets routes (Client Only)
+    Route::middleware('role:client')->group(function () {
+        Route::get('/client/tickets', [TicketController::class, 'clientIndex']);
+        Route::post('/client/tickets', [TicketController::class, 'clientStore']);
+        Route::get('/client/tickets/{ticket}', [TicketController::class, 'clientShow']);
+    });
+    
     // Assign Ticket (PM Only)
     Route::post('/tickets/{ticket}/assign', [TicketController::class, 'assign'])->middleware('role:project_manager');
     

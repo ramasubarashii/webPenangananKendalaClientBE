@@ -62,5 +62,15 @@ class DatabaseSeeder extends Seeder
                 'role' => 'owner',
             ]
         );
+
+        // Client
+        User::firstOrCreate(
+            ['email' => 'client@example.com'],
+            [
+                'name' => 'Corporate Client',
+                'password' => Hash::make('password'),
+                'role' => 'client',
+            ]
+        );
     }
 }

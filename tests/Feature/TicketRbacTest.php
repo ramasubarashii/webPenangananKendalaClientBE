@@ -18,6 +18,7 @@ class TicketRbacTest extends TestCase
     private $programmer;
     private $otherProgrammer;
     private $owner;
+    private $clientUser;
 
     protected function setUp(): void
     {
@@ -57,6 +58,13 @@ class TicketRbacTest extends TestCase
             'password' => bcrypt('password'),
             'role' => 'owner'
         ]);
+
+        $this->clientUser = User::create([
+            'name' => 'Test Client',
+            'email' => 'client@test.com',
+            'password' => bcrypt('password'),
+            'role' => 'client'
+        ]);
     }
 
     public function test_unauthenticated_user_cannot_access_tickets()
@@ -71,8 +79,7 @@ class TicketRbacTest extends TestCase
         $response = $this->actingAs($this->serviceDesk)
             ->postJson('/api/tickets', [
                 'title' => 'Test Ticket',
-                'description' => 'Test Description',
-                'priority' => 'high'
+                'description' => 'Test Description'
             ]);
 
         $response->assertStatus(201);
@@ -85,8 +92,7 @@ class TicketRbacTest extends TestCase
         $response2 = $this->actingAs($this->programmer)
             ->postJson('/api/tickets', [
                 'title' => 'Illegal Ticket',
-                'description' => 'Should fail',
-                'priority' => 'low'
+                'description' => 'Should fail'
             ]);
 
         $response2->assertStatus(403);
@@ -98,9 +104,9 @@ class TicketRbacTest extends TestCase
         $ticket = Ticket::create([
             'title' => 'Test Ticket',
             'description' => 'Test Description',
-            'priority' => 'medium',
             'status' => 'open',
-            'created_by_id' => $this->serviceDesk->id
+            'category' => 'Software',
+            'user_id' => $this->serviceDesk->id
         ]);
 
         // Service Desk trying to assign
@@ -131,9 +137,9 @@ class TicketRbacTest extends TestCase
         $ticket = Ticket::create([
             'title' => 'Test Ticket',
             'description' => 'Test Description',
-            'priority' => 'medium',
             'status' => 'open',
-            'created_by_id' => $this->serviceDesk->id
+            'category' => 'Software',
+            'user_id' => $this->serviceDesk->id
         ]);
 
         // Assign to programmer
@@ -164,5 +170,41 @@ class TicketRbacTest extends TestCase
             'id' => $ticket->id,
             'status' => 'in_progress'
         ]);
+    }
+
+    public function test_client_ticketing_actions()
+    {
+        // Client can create a ticket
+        $response = $this->actingAs($this->clientUser)
+            ->postJson('/api/client/tickets', [
+                'title' => 'Client Issue',
+                'description' => 'Cannot access portal',
+                'category' => 'Software'
+            ]);
+        $response->assertStatus(201);
+        $this->assertDatabaseHas('tickets', [
+            'title' => 'Client Issue',
+            'category' => 'Software',
+            'user_id' => $this->clientUser->id
+        ]);
+
+        $ticket = Ticket::where('title', 'Client Issue')->first();
+
+        // Client can view their tickets list
+        $response2 = $this->actingAs($this->clientUser)
+            ->getJson('/api/client/tickets');
+        $response2->assertStatus(200);
+        $response2->assertJsonCount(1);
+
+        // Client can view their specific ticket details
+        $response3 = $this->actingAs($this->clientUser)
+            ->getJson("/api/client/tickets/{$ticket->ticket_id}");
+        $response3->assertStatus(200);
+        $response3->assertJsonPath('title', 'Client Issue');
+
+        // Other users cannot access client specific ticket details
+        $response4 = $this->actingAs($this->programmer)
+            ->getJson("/api/client/tickets/{$ticket->ticket_id}");
+        $response4->assertStatus(403);
     }
 }

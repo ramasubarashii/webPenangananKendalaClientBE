@@ -23,6 +23,9 @@ class TicketController extends Controller
             $query->whereHas('assignments', function ($q) use ($user) {
                 $q->where('programmer_id', $user->id);
             });
+        } elseif ($user->role === 'client') {
+            // Clients can only see their own tickets
+            $query->where('user_id', $user->id);
         }
 
         return response()->json($query->get());
@@ -38,7 +41,6 @@ class TicketController extends Controller
         $request->validate([
             'title' => 'required|string|max:255',
             'description' => 'required|string',
-            'priority' => 'required|in:low,medium,high',
             'attachment' => 'nullable|file|mimes:jpg,jpeg,png,pdf,zip|max:5120', // Max 5MB
         ]);
 
@@ -50,10 +52,9 @@ class TicketController extends Controller
         $ticket = Ticket::create([
             'title' => $request->title,
             'description' => $request->description,
-            'priority' => $request->priority,
             'attachment_path' => $attachmentPath,
             'status' => 'open',
-            'created_by_id' => $request->user()->id,
+            'user_id' => $request->user()->id,
         ]);
 
         // Create log
@@ -208,5 +209,62 @@ class TicketController extends Controller
             'message' => 'Status updated successfully',
             'ticket' => $ticket->load(['creator', 'assignments.programmer', 'assignments.pm', 'progressLogs'])
         ]);
+    }
+
+    public function clientIndex(Request $request)
+    {
+        $tickets = Ticket::where('user_id', $request->user()->id)
+            ->with(['creator', 'assignments.programmer', 'assignments.pm', 'progressLogs.user'])
+            ->orderBy('created_at', 'desc')
+            ->get();
+        return response()->json($tickets);
+    }
+
+    public function clientStore(Request $request)
+    {
+        $request->validate([
+            'title' => 'required|string|max:255',
+            'description' => 'required|string',
+            'category' => 'required|in:Jaringan,Hardware,Software,Akun,Lainnya',
+            'attachment' => 'nullable|file|mimes:jpg,jpeg,png,pdf,zip|max:5120',
+        ]);
+
+        $attachmentPath = null;
+        if ($request->hasFile('attachment')) {
+            $attachmentPath = $request->file('attachment')->store('attachments', 'public');
+        }
+
+        $ticket = Ticket::create([
+            'title' => $request->title,
+            'description' => $request->description,
+            'category' => $request->category,
+            'attachment_path' => $attachmentPath,
+            'status' => 'open',
+            'user_id' => $request->user()->id,
+        ]);
+
+        ProgressLog::create([
+            'ticket_id' => $ticket->id,
+            'user_id' => $request->user()->id,
+            'previous_status' => null,
+            'new_status' => 'open',
+            'notes' => 'Ticket filed by Client.',
+        ]);
+
+        return response()->json($ticket->load(['creator', 'progressLogs']), 201);
+    }
+
+    public function clientShow(Request $request, $id)
+    {
+        $ticket = Ticket::where('ticket_id', $id)
+            ->where('user_id', $request->user()->id)
+            ->with(['creator', 'assignments.programmer', 'assignments.pm', 'progressLogs.user'])
+            ->first();
+
+        if (! $ticket) {
+            return response()->json(['message' => 'Tiket tidak ditemukan'], 404);
+        }
+
+        return response()->json($ticket);
     }
 }
