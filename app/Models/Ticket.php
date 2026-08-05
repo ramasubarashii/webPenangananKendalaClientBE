@@ -11,7 +11,6 @@ class Ticket extends Model
         'title',
         'description',
         'attachment_path',
-        'priority',
         'status',
         'category',
         'user_id',

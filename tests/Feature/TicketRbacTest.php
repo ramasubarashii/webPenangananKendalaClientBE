@@ -79,8 +79,7 @@ class TicketRbacTest extends TestCase
         $response = $this->actingAs($this->serviceDesk)
             ->postJson('/api/tickets', [
                 'title' => 'Test Ticket',
-                'description' => 'Test Description',
-                'priority' => 'high'
+                'description' => 'Test Description'
             ]);
 
         $response->assertStatus(201);
@@ -93,8 +92,7 @@ class TicketRbacTest extends TestCase
         $response2 = $this->actingAs($this->programmer)
             ->postJson('/api/tickets', [
                 'title' => 'Illegal Ticket',
-                'description' => 'Should fail',
-                'priority' => 'low'
+                'description' => 'Should fail'
             ]);
 
         $response2->assertStatus(403);
@@ -106,7 +104,6 @@ class TicketRbacTest extends TestCase
         $ticket = Ticket::create([
             'title' => 'Test Ticket',
             'description' => 'Test Description',
-            'priority' => 'medium',
             'status' => 'open',
             'category' => 'Software',
             'user_id' => $this->serviceDesk->id
@@ -140,7 +137,6 @@ class TicketRbacTest extends TestCase
         $ticket = Ticket::create([
             'title' => 'Test Ticket',
             'description' => 'Test Description',
-            'priority' => 'medium',
             'status' => 'open',
             'category' => 'Software',
             'user_id' => $this->serviceDesk->id
@@ -183,8 +179,7 @@ class TicketRbacTest extends TestCase
             ->postJson('/api/client/tickets', [
                 'title' => 'Client Issue',
                 'description' => 'Cannot access portal',
-                'category' => 'Software',
-                'priority' => 'High'
+                'category' => 'Software'
             ]);
         $response->assertStatus(201);
         $this->assertDatabaseHas('tickets', [

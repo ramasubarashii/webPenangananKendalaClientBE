@@ -41,7 +41,6 @@ class TicketController extends Controller
         $request->validate([
             'title' => 'required|string|max:255',
             'description' => 'required|string',
-            'priority' => 'required|in:low,medium,high',
             'attachment' => 'nullable|file|mimes:jpg,jpeg,png,pdf,zip|max:5120', // Max 5MB
         ]);
 
@@ -53,7 +52,6 @@ class TicketController extends Controller
         $ticket = Ticket::create([
             'title' => $request->title,
             'description' => $request->description,
-            'priority' => $request->priority,
             'attachment_path' => $attachmentPath,
             'status' => 'open',
             'user_id' => $request->user()->id,
@@ -227,8 +225,7 @@ class TicketController extends Controller
         $request->validate([
             'title' => 'required|string|max:255',
             'description' => 'required|string',
-            'category' => 'required|in:Jaringan,Hardware,Software,Akun',
-            'priority' => 'required|in:Low,Medium,High,low,medium,high',
+            'category' => 'required|in:Jaringan,Hardware,Software,Akun,Lainnya',
             'attachment' => 'nullable|file|mimes:jpg,jpeg,png,pdf,zip|max:5120',
         ]);
 
@@ -241,7 +238,6 @@ class TicketController extends Controller
             'title' => $request->title,
             'description' => $request->description,
             'category' => $request->category,
-            'priority' => strtolower($request->priority),
             'attachment_path' => $attachmentPath,
             'status' => 'open',
             'user_id' => $request->user()->id,

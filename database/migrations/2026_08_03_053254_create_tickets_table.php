@@ -16,8 +16,7 @@ return new class extends Migration
             $table->string('ticket_id')->unique();
             $table->string('title');
             $table->text('description');
-            $table->enum('category', ['Jaringan', 'Hardware', 'Software', 'Akun'])->nullable();
-            $table->enum('priority', ['low', 'medium', 'high'])->default('medium');
+            $table->enum('category', ['Jaringan', 'Hardware', 'Software', 'Akun', 'Lainnya'])->nullable();
             $table->enum('status', ['open', 'assigned', 'in_progress', 'resolved', 'closed', 'rejected'])->default('open');
             $table->string('attachment_path')->nullable();
             $table->foreignId('user_id')->constrained('users')->onDelete('cascade');
