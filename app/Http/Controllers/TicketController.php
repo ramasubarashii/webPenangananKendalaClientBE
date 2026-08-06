@@ -26,6 +26,9 @@ class TicketController extends Controller
         } elseif ($user->role === 'client') {
             // Clients can only see their own tickets
             $query->where('user_id', $user->id);
+        } elseif ($user->role === 'project_manager' || $user->role === 'owner') {
+            // PM and Owner only see escalated/assigned/progress/resolved/closed tickets, not raw open ones
+            $query->where('status', '!=', 'open');
         }
 
         return response()->json($query->get());
@@ -225,7 +228,7 @@ class TicketController extends Controller
         $request->validate([
             'title' => 'required|string|max:255',
             'description' => 'required|string',
-            'category' => 'required|in:Jaringan,Hardware,Software,Akun,Lainnya',
+            'category' => 'nullable|string|in:Jaringan,Hardware,Software,Akun,Lainnya',
             'attachment' => 'nullable|file|mimes:jpg,jpeg,png,pdf,zip|max:5120',
         ]);
 
@@ -237,7 +240,7 @@ class TicketController extends Controller
         $ticket = Ticket::create([
             'title' => $request->title,
             'description' => $request->description,
-            'category' => $request->category,
+            'category' => $request->category ?? null,
             'attachment_path' => $attachmentPath,
             'status' => 'open',
             'user_id' => $request->user()->id,
@@ -266,5 +269,56 @@ class TicketController extends Controller
         }
 
         return response()->json($ticket);
+    }
+
+    public function escalate(Request $request, $id)
+    {
+        // Only Service Desk can escalate
+        if ($request->user()->role !== 'service_desk') {
+            return response()->json(['message' => 'Hanya Service Desk yang dapat melakukan eskalasi tiket.'], 403);
+        }
+
+        $ticket = Ticket::where('ticket_id', $id)->first();
+        if (! $ticket) {
+            return response()->json(['message' => 'Tiket tidak ditemukan'], 404);
+        }
+
+        $request->validate([
+            'status' => 'required|string|in:ESCALATED_TO_PM,escalated_to_pm',
+            'internal_notes' => 'required|string',
+            'assigned_to_role' => 'required|string|in:PM,pm',
+            'priority' => 'nullable|string|in:low,medium,high,Low,Medium,High,belum_ditentukan',
+            'category' => 'nullable|string|in:Jaringan,Hardware,Software,Akun,Lainnya',
+        ]);
+
+        $oldStatus = $ticket->status;
+        $updateData = [
+            'status' => 'escalated_to_pm',
+            'internal_notes' => $request->internal_notes,
+            'assigned_to_role' => 'PM',
+        ];
+
+        if ($request->filled('priority')) {
+            $updateData['priority'] = strtolower($request->priority);
+        }
+
+        if ($request->filled('category')) {
+            $updateData['category'] = $request->category;
+        }
+
+        $ticket->update($updateData);
+
+        ProgressLog::create([
+            'ticket_id' => $ticket->id,
+            'user_id' => $request->user()->id,
+            'previous_status' => $oldStatus,
+            'new_status' => 'escalated_to_pm',
+            'notes' => 'Eskalasi ke PM dengan catatan: ' . substr($request->internal_notes, 0, 100),
+        ]);
+
+        return response()->json([
+            'message' => 'Tiket berhasil dieskalasikan ke PM.',
+            'ticket' => $ticket->load(['creator', 'assignments.programmer', 'assignments.pm', 'progressLogs'])
+        ]);
     }
 }

@@ -13,7 +13,10 @@ class Ticket extends Model
         'attachment_path',
         'status',
         'category',
+        'priority',
         'user_id',
+        'internal_notes',
+        'assigned_to_role',
     ];
 
     /**

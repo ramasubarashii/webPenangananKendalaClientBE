@@ -174,17 +174,15 @@ class TicketRbacTest extends TestCase
 
     public function test_client_ticketing_actions()
     {
-        // Client can create a ticket
+        // Client can create a ticket without selecting a category
         $response = $this->actingAs($this->clientUser)
             ->postJson('/api/client/tickets', [
                 'title' => 'Client Issue',
                 'description' => 'Cannot access portal',
-                'category' => 'Software'
             ]);
         $response->assertStatus(201);
         $this->assertDatabaseHas('tickets', [
             'title' => 'Client Issue',
-            'category' => 'Software',
             'user_id' => $this->clientUser->id
         ]);
 
@@ -206,5 +204,72 @@ class TicketRbacTest extends TestCase
         $response4 = $this->actingAs($this->programmer)
             ->getJson("/api/client/tickets/{$ticket->ticket_id}");
         $response4->assertStatus(403);
+    }
+
+    public function test_service_desk_can_escalate_to_pm_and_role_visibility()
+    {
+        // 1. Create a raw open ticket
+        $openTicket = Ticket::create([
+            'title' => 'Open Ticket',
+            'description' => 'Unreviewed problem',
+            'status' => 'open',
+            'user_id' => $this->clientUser->id
+        ]);
+
+        // 2. Programmer trying to escalate -> should fail
+        $response1 = $this->actingAs($this->programmer)
+            ->postJson("/api/tickets/{$openTicket->ticket_id}/escalate", [
+                'status' => 'ESCALATED_TO_PM',
+                'internal_notes' => 'Some analysis notes',
+                'assigned_to_role' => 'PM',
+            ]);
+        $response1->assertStatus(403);
+
+        // 3. Service Desk escalates with category assignment -> should succeed
+        $response2 = $this->actingAs($this->serviceDesk)
+            ->postJson("/api/tickets/{$openTicket->ticket_id}/escalate", [
+                'status' => 'ESCALATED_TO_PM',
+                'internal_notes' => 'Service Desk analysis notes',
+                'assigned_to_role' => 'PM',
+                'category' => 'Hardware',
+            ]);
+        $response2->assertStatus(200);
+        $this->assertDatabaseHas('tickets', [
+            'id' => $openTicket->id,
+            'status' => 'escalated_to_pm',
+            'internal_notes' => 'Service Desk analysis notes',
+            'assigned_to_role' => 'PM',
+            'category' => 'Hardware',
+        ]);
+
+        // 4. Create another raw open ticket
+        $newOpenTicket = Ticket::create([
+            'title' => 'Another Open Ticket',
+            'description' => 'Unreviewed problem 2',
+            'status' => 'open',
+            'category' => 'Software',
+            'user_id' => $this->clientUser->id
+        ]);
+
+        // 5. Test Role Visibility on API:
+        // PM Index -> should see escalated_to_pm but NOT open
+        $pmResponse = $this->actingAs($this->pm)->getJson('/api/tickets');
+        $pmResponse->assertStatus(200);
+        $pmTickets = $pmResponse->json();
+        $this->assertCount(1, $pmTickets);
+        $this->assertEquals($openTicket->ticket_id, $pmTickets[0]['ticket_id']);
+
+        // Owner Index -> should see escalated_to_pm but NOT open
+        $ownerResponse = $this->actingAs($this->owner)->getJson('/api/tickets');
+        $ownerResponse->assertStatus(200);
+        $ownerTickets = $ownerResponse->json();
+        $this->assertCount(1, $ownerTickets);
+        $this->assertEquals($openTicket->ticket_id, $ownerTickets[0]['ticket_id']);
+
+        // Service Desk Index -> should see BOTH (both open and escalated_to_pm)
+        $sdResponse = $this->actingAs($this->serviceDesk)->getJson('/api/tickets');
+        $sdResponse->assertStatus(200);
+        $sdTickets = $sdResponse->json();
+        $this->assertCount(2, $sdTickets);
     }
 }

@@ -17,7 +17,10 @@ return new class extends Migration
             $table->string('title');
             $table->text('description');
             $table->enum('category', ['Jaringan', 'Hardware', 'Software', 'Akun', 'Lainnya'])->nullable();
-            $table->enum('status', ['open', 'assigned', 'in_progress', 'resolved', 'closed', 'rejected'])->default('open');
+            $table->enum('priority', ['low', 'medium', 'high', 'belum_ditentukan'])->default('belum_ditentukan');
+            $table->enum('status', ['open', 'escalated_to_pm', 'in_progress', 'escalated_to_owner', 'resolved', 'closed', 'rejected', 'assigned'])->default('open');
+            $table->text('internal_notes')->nullable();
+            $table->string('assigned_to_role')->nullable();
             $table->string('attachment_path')->nullable();
             $table->foreignId('user_id')->constrained('users')->onDelete('cascade');
             $table->timestamps();
