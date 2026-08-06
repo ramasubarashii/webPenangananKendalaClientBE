@@ -82,6 +82,11 @@ class TicketController extends Controller
 
         $user = $request->user();
 
+        // Strict access check for Client role (Must use /api/client/tickets/{id})
+        if ($user->role === 'client') {
+            return response()->json(['message' => 'Unauthorized. Client must use public client endpoint.'], 403);
+        }
+
         // Strict access check for Programmer
         if ($user->role === 'programmer') {
             $isAssigned = TicketAssignment::where('ticket_id', $ticket->id)
