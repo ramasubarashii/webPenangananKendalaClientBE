@@ -347,6 +347,10 @@ class TicketController extends Controller
             return response()->json(['message' => 'Tiket tidak ditemukan'], 404);
         }
 
+        if (in_array(strtolower($ticket->status), ['closed', 'rejected'])) {
+            return response()->json(['message' => 'Tidak dapat menambahkan catatan atau pesan pada tiket yang sudah ditutup atau ditolak.'], 422);
+        }
+
         $request->validate([
             'notes' => 'required|string',
             'is_internal' => 'required|boolean',
@@ -364,6 +368,151 @@ class TicketController extends Controller
         return response()->json([
             'message' => $request->boolean('is_internal') ? 'Catatan internal berhasil disimpan.' : 'Pesan balasan ke Klien berhasil dikirim.',
             'log' => $log->load('user'),
+            'ticket' => $ticket->load(['creator', 'assignments.programmer', 'assignments.pm', 'progressLogs.user'])
+        ]);
+    }
+
+    public function pmReview(Request $request, $id)
+    {
+        $ticket = Ticket::where('ticket_id', $id)->first();
+        if (! $ticket) {
+            return response()->json(['message' => 'Tiket tidak ditemukan'], 404);
+        }
+
+        if ($request->user()->role !== 'project_manager') {
+            return response()->json(['message' => 'Hanya Project Manager yang dapat mereview hasil pengerjaan.'], 403);
+        }
+
+        $request->validate([
+            'decision' => 'required|string|in:ok,not_ok,OK,TIDAK_OK,tidak_ok',
+            'notes' => 'required|string',
+        ]);
+
+        $decision = strtolower($request->decision);
+        $oldStatus = $ticket->status;
+
+        if ($decision === 'ok') {
+            $newStatus = 'resolved';
+            $ticket->update(['status' => $newStatus]);
+
+            ProgressLog::create([
+                'ticket_id' => $ticket->id,
+                'user_id' => $request->user()->id,
+                'previous_status' => $oldStatus,
+                'new_status' => $newStatus,
+                'notes' => 'PM Review: OK (Disetujui). Catatan PM: ' . $request->notes,
+                'is_internal' => true,
+            ]);
+
+            return response()->json([
+                'message' => 'Hasil pengerjaan programmer disetujui oleh PM (OK). Tiket siap diverifikasi oleh Service Desk.',
+                'ticket' => $ticket->load(['creator', 'assignments.programmer', 'assignments.pm', 'progressLogs.user'])
+            ]);
+        } else {
+            $newStatus = 'in_progress';
+            $ticket->update(['status' => $newStatus]);
+
+            ProgressLog::create([
+                'ticket_id' => $ticket->id,
+                'user_id' => $request->user()->id,
+                'previous_status' => $oldStatus,
+                'new_status' => $newStatus,
+                'notes' => 'PM Review: TIDAK OK (Perlu Perbaikan). Tiket dikembalikan ke Programmer. Catatan Perbaikan: ' . $request->notes,
+                'is_internal' => true,
+            ]);
+
+            return response()->json([
+                'message' => 'Hasil pengerjaan ditolak oleh PM (TIDAK OK) dan dikembalikan ke programmer untuk perbaikan.',
+                'ticket' => $ticket->load(['creator', 'assignments.programmer', 'assignments.pm', 'progressLogs.user'])
+            ]);
+        }
+    }
+
+    public function escalateOwner(Request $request, $id)
+    {
+        $ticket = Ticket::where('ticket_id', $id)->first();
+        if (! $ticket) {
+            return response()->json(['message' => 'Tiket tidak ditemukan'], 404);
+        }
+
+        if ($request->user()->role !== 'project_manager') {
+            return response()->json(['message' => 'Hanya Project Manager yang dapat menyerahkan tiket ke Owner.'], 403);
+        }
+
+        $request->validate([
+            'notes' => 'required|string',
+        ]);
+
+        $oldStatus = $ticket->status;
+        $ticket->update([
+            'status' => 'escalated_to_owner',
+            'assigned_to_role' => 'OWNER',
+        ]);
+
+        ProgressLog::create([
+            'ticket_id' => $ticket->id,
+            'user_id' => $request->user()->id,
+            'previous_status' => $oldStatus,
+            'new_status' => 'escalated_to_owner',
+            'notes' => 'Dieskalasikan ke Owner oleh PM untuk persetujuan/keputusan. Catatan PM: ' . $request->notes,
+            'is_internal' => true,
+        ]);
+
+        return response()->json([
+            'message' => 'Tiket berhasil diserahkan ke Owner untuk persetujuan.',
+            'ticket' => $ticket->load(['creator', 'assignments.programmer', 'assignments.pm', 'progressLogs.user'])
+        ]);
+    }
+
+    public function ownerDecision(Request $request, $id)
+    {
+        $ticket = Ticket::where('ticket_id', $id)->first();
+        if (! $ticket) {
+            return response()->json(['message' => 'Tiket tidak ditemukan'], 404);
+        }
+
+        if ($request->user()->role !== 'owner') {
+            return response()->json(['message' => 'Hanya Owner yang dapat memberikan keputusan tiket ini.'], 403);
+        }
+
+        $request->validate([
+            'decision' => 'required|string|in:approved,rejected,returned_to_pm',
+            'notes' => 'required|string',
+        ]);
+
+        $oldStatus = $ticket->status;
+        $decision = strtolower($request->decision);
+
+        if ($decision === 'approved') {
+            $newStatus = 'escalated_to_pm';
+            $assignedRole = 'PM';
+            $msg = 'Keputusan Owner: Disetujui (Approved). Tiket diteruskan kembali ke PM.';
+        } elseif ($decision === 'rejected') {
+            $newStatus = 'rejected';
+            $assignedRole = 'SERVICE_DESK';
+            $msg = 'Keputusan Owner: Ditolak (Rejected). Tiket ditolak secara permanen.';
+        } else {
+            $newStatus = 'escalated_to_pm';
+            $assignedRole = 'PM';
+            $msg = 'Keputusan Owner: Dikembalikan ke PM dengan instruksi khusus.';
+        }
+
+        $ticket->update([
+            'status' => $newStatus,
+            'assigned_to_role' => $assignedRole,
+        ]);
+
+        ProgressLog::create([
+            'ticket_id' => $ticket->id,
+            'user_id' => $request->user()->id,
+            'previous_status' => $oldStatus,
+            'new_status' => $newStatus,
+            'notes' => 'Keputusan Owner: ' . $request->notes,
+            'is_internal' => true,
+        ]);
+
+        return response()->json([
+            'message' => $msg,
             'ticket' => $ticket->load(['creator', 'assignments.programmer', 'assignments.pm', 'progressLogs.user'])
         ]);
     }

@@ -38,6 +38,15 @@ Route::middleware('auth:sanctum')->group(function () {
     // Add Ticket Progress Log / Reply
     Route::post('/tickets/{ticket}/logs', [TicketController::class, 'addLog']);
 
+    // PM Review of Programmer Work (OK / TIDAK OK)
+    Route::post('/tickets/{ticket}/pm-review', [TicketController::class, 'pmReview'])->middleware('role:project_manager');
+
+    // PM Escalate to Owner
+    Route::post('/tickets/{ticket}/escalate-owner', [TicketController::class, 'escalateOwner'])->middleware('role:project_manager');
+
+    // Owner Decision on Escalated Issues
+    Route::post('/tickets/{ticket}/owner-decision', [TicketController::class, 'ownerDecision'])->middleware('role:owner');
+
     // Helper: List Programmers (For PM assign form)
     Route::get('/programmers', function () {
         return response()->json(User::where('role', 'programmer')->get(['id', 'name', 'email']));

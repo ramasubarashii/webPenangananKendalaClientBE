@@ -315,4 +315,82 @@ class TicketRbacTest extends TestCase
         $staffLogs = $staffResponse->json('progress_logs');
         $this->assertCount(2, $staffLogs);
     }
+
+    public function test_cannot_add_log_on_closed_or_rejected_ticket()
+    {
+        $closedTicket = Ticket::create([
+            'title' => 'Closed Ticket Test',
+            'description' => 'Already finished',
+            'status' => 'closed',
+            'user_id' => $this->clientUser->id
+        ]);
+
+        $response = $this->actingAs($this->serviceDesk)
+            ->postJson("/api/tickets/{$closedTicket->ticket_id}/logs", [
+                'notes' => 'Attempting note on closed ticket',
+                'is_internal' => true,
+            ]);
+
+        $response->assertStatus(422);
+        $response->assertJsonPath('message', 'Tidak dapat menambahkan catatan atau pesan pada tiket yang sudah ditutup atau ditolak.');
+    }
+
+    public function test_pm_review_ok_and_not_ok()
+    {
+        $ticket = Ticket::create([
+            'title' => 'Feature Implementation',
+            'description' => 'Need testing',
+            'status' => 'resolved',
+            'user_id' => $this->clientUser->id
+        ]);
+
+        // 1. PM Reviews TIDAK OK -> status reverts to in_progress
+        $notOkResponse = $this->actingAs($this->pm)
+            ->postJson("/api/tickets/{$ticket->ticket_id}/pm-review", [
+                'decision' => 'not_ok',
+                'notes' => 'Bug found in login form',
+            ]);
+
+        $notOkResponse->assertStatus(200);
+        $this->assertEquals('in_progress', $ticket->fresh()->status);
+
+        // 2. PM Reviews OK -> status remains resolved
+        $okResponse = $this->actingAs($this->pm)
+            ->postJson("/api/tickets/{$ticket->ticket_id}/pm-review", [
+                'decision' => 'ok',
+                'notes' => 'Fix verified cleanly',
+            ]);
+
+        $okResponse->assertStatus(200);
+        $this->assertEquals('resolved', $ticket->fresh()->status);
+    }
+
+    public function test_pm_escalate_to_owner_and_owner_decision()
+    {
+        $ticket = Ticket::create([
+            'title' => 'Critical Scope Expansion',
+            'description' => 'Extra server budget needed',
+            'status' => 'escalated_to_pm',
+            'user_id' => $this->clientUser->id
+        ]);
+
+        // 1. PM Escalates to Owner
+        $escalateResponse = $this->actingAs($this->pm)
+            ->postJson("/api/tickets/{$ticket->ticket_id}/escalate-owner", [
+                'notes' => 'Requires Owner budget approval for high-capacity cloud server',
+            ]);
+
+        $escalateResponse->assertStatus(200);
+        $this->assertEquals('escalated_to_owner', $ticket->fresh()->status);
+
+        // 2. Owner Approves decision
+        $ownerResponse = $this->actingAs($this->owner)
+            ->postJson("/api/tickets/{$ticket->ticket_id}/owner-decision", [
+                'decision' => 'approved',
+                'notes' => 'Budget approved up to $500',
+            ]);
+
+        $ownerResponse->assertStatus(200);
+        $this->assertEquals('escalated_to_pm', $ticket->fresh()->status);
+    }
 }
