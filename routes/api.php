@@ -35,6 +35,9 @@ Route::middleware('auth:sanctum')->group(function () {
     // Update Ticket Status
     Route::post('/tickets/{ticket}/status', [TicketController::class, 'updateStatus']);
 
+    // Add Ticket Progress Log / Reply
+    Route::post('/tickets/{ticket}/logs', [TicketController::class, 'addLog']);
+
     // Helper: List Programmers (For PM assign form)
     Route::get('/programmers', function () {
         return response()->json(User::where('role', 'programmer')->get(['id', 'name', 'email']));

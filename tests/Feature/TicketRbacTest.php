@@ -272,4 +272,47 @@ class TicketRbacTest extends TestCase
         $sdTickets = $sdResponse->json();
         $this->assertCount(2, $sdTickets);
     }
+
+    public function test_internal_logs_filtered_from_client_endpoint()
+    {
+        $ticket = Ticket::create([
+            'title' => 'Security Log Test',
+            'description' => 'Testing audit log separation',
+            'status' => 'open',
+            'user_id' => $this->clientUser->id
+        ]);
+
+        // Create internal log
+        ProgressLog::create([
+            'ticket_id' => $ticket->id,
+            'user_id' => $this->serviceDesk->id,
+            'new_status' => 'escalated_to_pm',
+            'notes' => 'Internal escalation details for staff only',
+            'is_internal' => true
+        ]);
+
+        // Create public reply log
+        ProgressLog::create([
+            'ticket_id' => $ticket->id,
+            'user_id' => $this->serviceDesk->id,
+            'new_status' => 'escalated_to_pm',
+            'notes' => 'Hello Client, your issue has been received and escalated.',
+            'is_internal' => false
+        ]);
+
+        // Client request -> should ONLY see public log
+        $clientResponse = $this->actingAs($this->clientUser)
+            ->getJson("/api/client/tickets/{$ticket->ticket_id}");
+        $clientResponse->assertStatus(200);
+        $logs = $clientResponse->json('progress_logs');
+        $this->assertCount(1, $logs);
+        $this->assertEquals('Hello Client, your issue has been received and escalated.', $logs[0]['notes']);
+
+        // Internal staff request -> should see ALL logs (both internal and public)
+        $staffResponse = $this->actingAs($this->serviceDesk)
+            ->getJson("/api/tickets/{$ticket->ticket_id}");
+        $staffResponse->assertStatus(200);
+        $staffLogs = $staffResponse->json('progress_logs');
+        $this->assertCount(2, $staffLogs);
+    }
 }

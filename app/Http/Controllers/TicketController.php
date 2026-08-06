@@ -67,6 +67,7 @@ class TicketController extends Controller
             'previous_status' => null,
             'new_status' => 'open',
             'notes' => 'Ticket created by Service Desk.',
+            'is_internal' => true,
         ]);
 
         return response()->json($ticket->load(['creator', 'progressLogs']), 201);
@@ -138,6 +139,7 @@ class TicketController extends Controller
             'previous_status' => $oldStatus,
             'new_status' => 'assigned',
             'notes' => "Ticket assigned to programmer: {$programmer->name} by PM: {$request->user()->name}. Est. Hours: {$request->estimated_hours}.",
+            'is_internal' => true,
         ]);
 
         return response()->json([
@@ -206,6 +208,7 @@ class TicketController extends Controller
             'previous_status' => $oldStatus,
             'new_status' => $newStatus,
             'notes' => $request->notes,
+            'is_internal' => $request->has('is_internal') ? $request->boolean('is_internal') : true,
         ]);
 
         return response()->json([
@@ -251,7 +254,8 @@ class TicketController extends Controller
             'user_id' => $request->user()->id,
             'previous_status' => null,
             'new_status' => 'open',
-            'notes' => 'Ticket filed by Client.',
+            'notes' => 'Tiket bantuan berhasil dibuat oleh Klien.',
+            'is_internal' => false,
         ]);
 
         return response()->json($ticket->load(['creator', 'progressLogs']), 201);
@@ -261,12 +265,20 @@ class TicketController extends Controller
     {
         $ticket = Ticket::where('ticket_id', $id)
             ->where('user_id', $request->user()->id)
-            ->with(['creator', 'assignments.programmer', 'assignments.pm', 'progressLogs.user'])
+            ->with([
+                'creator:id,name,email',
+                'progressLogs' => function ($query) {
+                    $query->where('is_internal', false)->with('user:id,name,role');
+                }
+            ])
             ->first();
 
         if (! $ticket) {
             return response()->json(['message' => 'Tiket tidak ditemukan'], 404);
         }
+
+        // Hide internal operational fields from client JSON response
+        $ticket->makeHidden(['internal_notes', 'assigned_to_role']);
 
         return response()->json($ticket);
     }
@@ -314,11 +326,40 @@ class TicketController extends Controller
             'previous_status' => $oldStatus,
             'new_status' => 'escalated_to_pm',
             'notes' => 'Eskalasi ke PM dengan catatan: ' . substr($request->internal_notes, 0, 100),
+            'is_internal' => true,
         ]);
 
         return response()->json([
             'message' => 'Tiket berhasil dieskalasikan ke PM.',
             'ticket' => $ticket->load(['creator', 'assignments.programmer', 'assignments.pm', 'progressLogs'])
+        ]);
+    }
+
+    public function addLog(Request $request, $id)
+    {
+        $ticket = Ticket::where('ticket_id', $id)->first();
+        if (! $ticket) {
+            return response()->json(['message' => 'Tiket tidak ditemukan'], 404);
+        }
+
+        $request->validate([
+            'notes' => 'required|string',
+            'is_internal' => 'required|boolean',
+        ]);
+
+        $log = ProgressLog::create([
+            'ticket_id' => $ticket->id,
+            'user_id' => $request->user()->id,
+            'previous_status' => $ticket->status,
+            'new_status' => $ticket->status,
+            'notes' => $request->notes,
+            'is_internal' => $request->boolean('is_internal'),
+        ]);
+
+        return response()->json([
+            'message' => $request->boolean('is_internal') ? 'Catatan internal berhasil disimpan.' : 'Pesan balasan ke Klien berhasil dikirim.',
+            'log' => $log->load('user'),
+            'ticket' => $ticket->load(['creator', 'assignments.programmer', 'assignments.pm', 'progressLogs.user'])
         ]);
     }
 }

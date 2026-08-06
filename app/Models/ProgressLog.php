@@ -12,6 +12,11 @@ class ProgressLog extends Model
         'previous_status',
         'new_status',
         'notes',
+        'is_internal',
+    ];
+
+    protected $casts = [
+        'is_internal' => 'boolean',
     ];
 
     public function ticket()

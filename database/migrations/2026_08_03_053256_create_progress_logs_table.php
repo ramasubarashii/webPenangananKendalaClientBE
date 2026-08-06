@@ -18,6 +18,7 @@ return new class extends Migration
             $table->string('previous_status')->nullable();
             $table->string('new_status');
             $table->text('notes')->nullable();
+            $table->boolean('is_internal')->default(true);
             $table->timestamps();
         });
     }
