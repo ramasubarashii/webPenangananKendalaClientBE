@@ -163,7 +163,7 @@ class TicketController extends Controller
         $user = $request->user();
 
         $request->validate([
-            'status' => 'required|in:open,assigned,in_progress,resolved,closed,rejected',
+            'status' => 'required|in:open,assigned,in_progress,pending_review,resolved,closed,rejected',
             'notes' => 'required|string', // enforce explanation notes for status changes
         ]);
 
@@ -180,7 +180,22 @@ class TicketController extends Controller
             if ($user->role !== 'service_desk') {
                 return response()->json(['message' => 'Only Service Desk can close or reject tickets.'], 403);
             }
-        } elseif (in_array($newStatus, ['in_progress', 'resolved'])) {
+        } elseif ($newStatus === 'pending_review') {
+            // Only programmer assigned to this ticket can submit for PM review
+            if ($user->role !== 'programmer') {
+                return response()->json(['message' => 'Hanya Programmer yang dapat mengajukan tiket untuk direview PM.'], 403);
+            }
+            $isAssigned = TicketAssignment::where('ticket_id', $ticket->id)
+                ->where('programmer_id', $user->id)
+                ->exists();
+            if (! $isAssigned) {
+                return response()->json(['message' => 'Kamu tidak ditugaskan ke tiket ini.'], 403);
+            }
+            // Prevent submitting if not in_progress
+            if ($oldStatus !== 'in_progress' && $oldStatus !== 'assigned') {
+                return response()->json(['message' => 'Tiket hanya dapat diajukan review saat berstatus in_progress atau assigned.'], 422);
+            }
+        } elseif (in_array($newStatus, ['in_progress'])) {
             // Programmers can only update their assigned tickets
             if ($user->role === 'programmer') {
                 $isAssigned = TicketAssignment::where('ticket_id', $ticket->id)
@@ -192,6 +207,14 @@ class TicketController extends Controller
                 }
             } elseif ($user->role !== 'project_manager') {
                 return response()->json(['message' => 'Unauthorized to perform technical status update.'], 403);
+            }
+        } elseif ($newStatus === 'resolved') {
+            // Only PM can set resolved (via pmReview endpoint, not this one)
+            // Block direct resolved from programmer
+            if ($user->role === 'programmer') {
+                return response()->json(['message' => 'Programmer tidak dapat langsung menyelesaikan tiket. Ajukan ke PM terlebih dahulu.'], 403);
+            } elseif ($user->role !== 'project_manager' && $user->role !== 'service_desk') {
+                return response()->json(['message' => 'Unauthorized to mark ticket as resolved.'], 403);
             }
         } elseif ($newStatus === 'open') {
             if ($user->role !== 'service_desk') {
@@ -388,6 +411,13 @@ class TicketController extends Controller
             'notes' => 'required|string',
         ]);
 
+        // Guard: PM can only review tickets in pending_review status
+        if ($ticket->status !== 'pending_review') {
+            return response()->json([
+                'message' => 'Review PM hanya dapat dilakukan pada tiket yang berstatus menunggu review (pending_review).'
+            ], 422);
+        }
+
         $decision = strtolower($request->decision);
         $oldStatus = $ticket->status;
 
@@ -400,7 +430,8 @@ class TicketController extends Controller
                 'user_id' => $request->user()->id,
                 'previous_status' => $oldStatus,
                 'new_status' => $newStatus,
-                'notes' => 'PM Review: OK (Disetujui). Catatan PM: ' . $request->notes,
+                // Marker [PM_REVIEW_OK] used by frontend notification detection
+                'notes' => '[PM_REVIEW_OK] Hasil pengerjaan disetujui oleh PM. Catatan PM: ' . $request->notes,
                 'is_internal' => true,
             ]);
 
@@ -417,7 +448,8 @@ class TicketController extends Controller
                 'user_id' => $request->user()->id,
                 'previous_status' => $oldStatus,
                 'new_status' => $newStatus,
-                'notes' => 'PM Review: TIDAK OK (Perlu Perbaikan). Tiket dikembalikan ke Programmer. Catatan Perbaikan: ' . $request->notes,
+                // Marker [PM_REVIEW_TIDAK_OK] used by frontend notification detection
+                'notes' => '[PM_REVIEW_TIDAK_OK] Perlu Perbaikan. Catatan PM: ' . $request->notes,
                 'is_internal' => true,
             ]);
 
