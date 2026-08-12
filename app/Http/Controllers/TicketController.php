@@ -101,6 +101,107 @@ class TicketController extends Controller
         return response()->json($ticket->load(['creator', 'assignments.programmer', 'assignments.pm', 'progressLogs.user']));
     }
 
+    /**
+     * Service Desk: Confirm or reject a pending_confirmation ticket from client.
+     * POST /tickets/{id}/confirm
+     * body: { action: 'confirm'|'reject', notes: string }
+     */
+    public function confirmTicket(Request $request, $id)
+    {
+        $ticket = Ticket::where('ticket_id', $id)->first();
+        if (! $ticket) {
+            return response()->json(['message' => 'Tiket tidak ditemukan'], 404);
+        }
+
+        if ($request->user()->role !== 'service_desk') {
+            return response()->json(['message' => 'Hanya Service Desk yang dapat mengkonfirmasi tiket.'], 403);
+        }
+
+        if ($ticket->status !== 'pending_confirmation') {
+            return response()->json(['message' => 'Hanya tiket berstatus menunggu konfirmasi yang dapat dikonfirmasi.'], 422);
+        }
+
+        $request->validate([
+            'action' => 'required|in:confirm,reject',
+            'notes'  => 'required|string',
+        ]);
+
+        $oldStatus = $ticket->status;
+
+        if ($request->action === 'confirm') {
+            $ticket->update(['status' => 'open']);
+            ProgressLog::create([
+                'ticket_id'       => $ticket->id,
+                'user_id'         => $request->user()->id,
+                'previous_status' => $oldStatus,
+                'new_status'      => 'open',
+                'notes'           => '[SD_CONFIRMED] Tiket dikonfirmasi oleh Service Desk. ' . $request->notes,
+                'is_internal'     => false,
+            ]);
+            return response()->json([
+                'message' => 'Tiket berhasil dikonfirmasi dan masuk ke antrian.',
+                'ticket'  => $ticket->load(['creator', 'assignments.programmer', 'assignments.pm', 'progressLogs.user'])
+            ]);
+        } else {
+            $ticket->update(['status' => 'rejected']);
+            ProgressLog::create([
+                'ticket_id'       => $ticket->id,
+                'user_id'         => $request->user()->id,
+                'previous_status' => $oldStatus,
+                'new_status'      => 'rejected',
+                'notes'           => '[SD_REJECTED] Tiket ditolak oleh Service Desk. Alasan: ' . $request->notes,
+                'is_internal'     => false,
+            ]);
+            return response()->json([
+                'message' => 'Tiket ditolak dan ditutup.',
+                'ticket'  => $ticket->load(['creator', 'assignments.programmer', 'assignments.pm', 'progressLogs.user'])
+            ]);
+        }
+    }
+
+    /**
+     * Project Manager: Update ticket priority at any time (while not closed/rejected).
+     * POST /tickets/{id}/priority
+     * body: { priority: 'low'|'medium'|'high'|'belum_ditentukan', notes: string }
+     */
+    public function updatePriority(Request $request, $id)
+    {
+        $ticket = Ticket::where('ticket_id', $id)->first();
+        if (! $ticket) {
+            return response()->json(['message' => 'Tiket tidak ditemukan'], 404);
+        }
+
+        if ($request->user()->role !== 'project_manager') {
+            return response()->json(['message' => 'Hanya Project Manager yang dapat mengubah prioritas tiket.'], 403);
+        }
+
+        if (in_array($ticket->status, ['closed', 'rejected'])) {
+            return response()->json(['message' => 'Prioritas tidak dapat diubah pada tiket yang sudah closed atau rejected.'], 422);
+        }
+
+        $request->validate([
+            'priority' => 'required|in:low,medium,high,belum_ditentukan',
+            'notes'    => 'nullable|string',
+        ]);
+
+        $oldPriority = $ticket->priority;
+        $ticket->update(['priority' => $request->priority]);
+
+        ProgressLog::create([
+            'ticket_id'       => $ticket->id,
+            'user_id'         => $request->user()->id,
+            'previous_status' => $ticket->status,
+            'new_status'      => $ticket->status,
+            'notes'           => '[PRIORITY_UPDATE] PM mengubah prioritas dari ' . ($oldPriority ?? 'belum_ditentukan') . ' menjadi ' . $request->priority . ($request->notes ? '. Catatan: ' . $request->notes : '.'),
+            'is_internal'     => true,
+        ]);
+
+        return response()->json([
+            'message' => 'Prioritas tiket berhasil diperbarui.',
+            'ticket'  => $ticket->load(['creator', 'assignments.programmer', 'assignments.pm', 'progressLogs.user'])
+        ]);
+    }
+
     public function assign(Request $request, $id)
     {
         $ticket = Ticket::where('ticket_id', $id)->first();
@@ -114,8 +215,10 @@ class TicketController extends Controller
         }
 
         $request->validate([
-            'programmer_id' => 'required|exists:users,id',
-            'estimated_hours' => 'required|numeric|min:0.1',
+            'programmer_id'  => 'required|exists:users,id',
+            'estimated_hours'=> 'required|numeric|min:0.1',
+            'estimated_unit' => 'nullable|in:hours,days',
+            'priority'       => 'nullable|in:low,medium,high,belum_ditentukan',
         ]);
 
         $programmer = User::find($request->programmer_id);
@@ -124,32 +227,40 @@ class TicketController extends Controller
         }
 
         $oldStatus = $ticket->status;
+        $unit = $request->estimated_unit ?? 'hours';
+        $unitLabel = $unit === 'days' ? 'Hari' : 'Jam';
 
         // Update or create ticket assignment
         TicketAssignment::updateOrCreate(
             ['ticket_id' => $ticket->id],
             [
-                'pm_id' => $request->user()->id,
-                'programmer_id' => $request->programmer_id,
+                'pm_id'           => $request->user()->id,
+                'programmer_id'   => $request->programmer_id,
                 'estimated_hours' => $request->estimated_hours,
+                'estimated_unit'  => $unit,
             ]
         );
 
-        $ticket->update(['status' => 'assigned']);
+        // Update priority if PM provided it
+        if ($request->filled('priority')) {
+            $ticket->update(['priority' => $request->priority, 'status' => 'assigned']);
+        } else {
+            $ticket->update(['status' => 'assigned']);
+        }
 
         // Log the assignment
         ProgressLog::create([
-            'ticket_id' => $ticket->id,
-            'user_id' => $request->user()->id,
+            'ticket_id'       => $ticket->id,
+            'user_id'         => $request->user()->id,
             'previous_status' => $oldStatus,
-            'new_status' => 'assigned',
-            'notes' => "Ticket assigned to programmer: {$programmer->name} by PM: {$request->user()->name}. Est. Hours: {$request->estimated_hours}.",
-            'is_internal' => true,
+            'new_status'      => 'assigned',
+            'notes'           => "Tiket ditugaskan ke programmer: {$programmer->name} oleh PM: {$request->user()->name}. Estimasi: {$request->estimated_hours} {$unitLabel}.",
+            'is_internal'     => true,
         ]);
 
         return response()->json([
             'message' => 'Ticket assigned successfully',
-            'ticket' => $ticket->load(['creator', 'assignments.programmer', 'assignments.pm', 'progressLogs'])
+            'ticket'  => $ticket->load(['creator', 'assignments.programmer', 'assignments.pm', 'progressLogs'])
         ]);
     }
 
@@ -163,8 +274,8 @@ class TicketController extends Controller
         $user = $request->user();
 
         $request->validate([
-            'status' => 'required|in:open,assigned,in_progress,pending_review,resolved,closed,rejected',
-            'notes' => 'required|string', // enforce explanation notes for status changes
+            'status' => 'required|in:pending_confirmation,open,assigned,in_progress,pending_review,resolved,closed,rejected',
+            'notes' => 'required|string',
         ]);
 
         $newStatus = $request->status;
@@ -273,7 +384,7 @@ class TicketController extends Controller
             'description' => $request->description,
             'category' => $request->category ?? null,
             'attachment_path' => $attachmentPath,
-            'status' => 'open',
+            'status' => 'pending_confirmation', // Waits for Service Desk confirmation
             'user_id' => $request->user()->id,
         ]);
 
@@ -281,8 +392,8 @@ class TicketController extends Controller
             'ticket_id' => $ticket->id,
             'user_id' => $request->user()->id,
             'previous_status' => null,
-            'new_status' => 'open',
-            'notes' => 'Tiket bantuan berhasil dibuat oleh Klien.',
+            'new_status' => 'pending_confirmation',
+            'notes' => 'Tiket bantuan berhasil dibuat oleh Klien. Menunggu konfirmasi Service Desk.',
             'is_internal' => false,
         ]);
 

@@ -32,6 +32,12 @@ Route::middleware('auth:sanctum')->group(function () {
     // Escalate Ticket (Service Desk Only)
     Route::match(['post', 'put', 'patch'], '/tickets/{ticket}/escalate', [TicketController::class, 'escalate'])->middleware('role:service_desk');
 
+    // Confirm or Reject pending ticket from client (Service Desk Only)
+    Route::post('/tickets/{ticket}/confirm', [TicketController::class, 'confirmTicket'])->middleware('role:service_desk');
+
+    // Update Ticket Priority (PM Only, any status except closed/rejected)
+    Route::post('/tickets/{ticket}/priority', [TicketController::class, 'updatePriority'])->middleware('role:project_manager');
+
     // Update Ticket Status
     Route::post('/tickets/{ticket}/status', [TicketController::class, 'updateStatus']);
 

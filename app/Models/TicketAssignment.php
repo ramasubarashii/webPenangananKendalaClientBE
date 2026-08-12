@@ -11,6 +11,7 @@ class TicketAssignment extends Model
         'pm_id',
         'programmer_id',
         'estimated_hours',
+        'estimated_unit',
     ];
 
     public function ticket()
