@@ -17,6 +17,11 @@ class Ticket extends Model
         'user_id',
         'internal_notes',
         'assigned_to_role',
+        // Walk-in / non-user reporter fields
+        'reporter_name',
+        'reporter_contact',
+        'contact_method',
+        'contact_method_notes',
     ];
 
     /**

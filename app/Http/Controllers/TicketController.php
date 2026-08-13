@@ -73,6 +73,69 @@ class TicketController extends Controller
         return response()->json($ticket->load(['creator', 'progressLogs']), 201);
     }
 
+    /**
+     * Service Desk: Create a ticket on behalf of a NON-REGISTERED (walk-in) client.
+     * POST /tickets/walk-in
+     * The ticket is created by the Service Desk account (user_id = SD) and goes
+     * directly to 'open' status — no pending_confirmation step needed.
+     */
+    public function storeWalkIn(Request $request)
+    {
+        if ($request->user()->role !== 'service_desk') {
+            return response()->json(['message' => 'Hanya Service Desk yang dapat membuat tiket walk-in.'], 403);
+        }
+
+        $request->validate([
+            'reporter_name'         => 'required|string|max:255',
+            'reporter_contact'      => 'nullable|string|max:255',
+            'contact_method'        => 'required|in:whatsapp,telepon,email,walk_in,lainnya',
+            'contact_method_notes'  => 'nullable|string|max:255',
+            'title'                 => 'required|string|max:255',
+            'description'           => 'required|string',
+            'category'              => 'nullable|string|in:Jaringan,Hardware,Software,Akun,Lainnya',
+            'attachment'            => 'nullable|file|mimes:jpg,jpeg,png,pdf,zip|max:5120',
+        ]);
+
+        $attachmentPath = null;
+        if ($request->hasFile('attachment')) {
+            $attachmentPath = $request->file('attachment')->store('attachments', 'public');
+        }
+
+        $contactMethodLabel = match($request->contact_method) {
+            'whatsapp' => 'WhatsApp',
+            'telepon'  => 'Telepon',
+            'email'    => 'Email',
+            'walk_in'  => 'Datang Langsung (Walk-in)',
+            'lainnya'  => 'Lainnya: ' . ($request->contact_method_notes ?? '-'),
+            default    => $request->contact_method,
+        };
+
+        $ticket = Ticket::create([
+            'title'                 => $request->title,
+            'description'           => $request->description,
+            'category'              => $request->category ?? null,
+            'attachment_path'       => $attachmentPath,
+            'status'                => 'open',
+            'user_id'               => $request->user()->id,
+            'reporter_name'         => $request->reporter_name,
+            'reporter_contact'      => $request->reporter_contact ?? null,
+            'contact_method'        => $request->contact_method,
+            'contact_method_notes'  => $request->contact_method_notes ?? null,
+        ]);
+
+        // Create audit log with [WALK_IN] marker for traceability
+        ProgressLog::create([
+            'ticket_id'       => $ticket->id,
+            'user_id'         => $request->user()->id,
+            'previous_status' => null,
+            'new_status'      => 'open',
+            'notes'           => '[WALK_IN] Tiket dibuat oleh Service Desk (' . $request->user()->name . ') untuk client non-sistem: ' . $request->reporter_name . '. Metode kontak: ' . $contactMethodLabel . '.',
+            'is_internal'     => true,
+        ]);
+
+        return response()->json($ticket->load(['creator', 'progressLogs']), 201);
+    }
+
     public function show(Request $request, $id)
     {
         $ticket = Ticket::where('ticket_id', $id)->first();
