@@ -17,6 +17,11 @@ Route::middleware('auth:sanctum')->group(function () {
     // Tickets routes
     Route::get('/tickets', [TicketController::class, 'index']);
     Route::post('/tickets', [TicketController::class, 'store'])->middleware('role:service_desk');
+
+    // Walk-in Ticket (Service Desk creates ticket for non-registered client)
+    // IMPORTANT: Must be defined BEFORE /tickets/{ticket} to avoid route param conflict
+    Route::post('/tickets/walk-in', [TicketController::class, 'storeWalkIn'])->middleware('role:service_desk');
+
     Route::get('/tickets/{ticket}', [TicketController::class, 'show']);
     
     // Client tickets routes (Client Only)
