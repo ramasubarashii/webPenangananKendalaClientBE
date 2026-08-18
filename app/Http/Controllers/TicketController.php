@@ -682,7 +682,7 @@ class TicketController extends Controller
         }
 
         $request->validate([
-            'decision' => 'required|string|in:approved,rejected,returned_to_pm',
+            'decision' => 'required|string|in:approved,resolved,rejected,returned_to_pm',
             'notes' => 'required|string',
         ]);
 
@@ -692,15 +692,23 @@ class TicketController extends Controller
         if ($decision === 'approved') {
             $newStatus = 'escalated_to_pm';
             $assignedRole = 'PM';
+            $logMarker = '[OWNER_DECISION_APPROVED]';
             $msg = 'Keputusan Owner: Disetujui (Approved). Tiket diteruskan kembali ke PM.';
+        } elseif ($decision === 'resolved') {
+            $newStatus = 'resolved';
+            $assignedRole = 'SERVICE_DESK';
+            $logMarker = '[OWNER_DECISION_RESOLVED]';
+            $msg = 'Keputusan Owner: Disetujui & Selesaikan Langsung (Resolved). Tiket siap diverifikasi Service Desk.';
         } elseif ($decision === 'rejected') {
             $newStatus = 'rejected';
             $assignedRole = 'SERVICE_DESK';
+            $logMarker = '[OWNER_DECISION_REJECTED]';
             $msg = 'Keputusan Owner: Ditolak (Rejected). Tiket ditolak secara permanen.';
         } else {
             $newStatus = 'escalated_to_pm';
             $assignedRole = 'PM';
-            $msg = 'Keputusan Owner: Dikembalikan ke PM dengan instruksi khusus.';
+            $logMarker = '[OWNER_DECISION_RETURNED]';
+            $msg = 'Keputusan Owner: Dikembalikan ke PM dengan instruksi kajian ulang.';
         }
 
         $ticket->update([
@@ -713,7 +721,7 @@ class TicketController extends Controller
             'user_id' => $request->user()->id,
             'previous_status' => $oldStatus,
             'new_status' => $newStatus,
-            'notes' => 'Keputusan Owner: ' . $request->notes,
+            'notes' => $logMarker . ' Catatan Owner: ' . $request->notes,
             'is_internal' => true,
         ]);
 
