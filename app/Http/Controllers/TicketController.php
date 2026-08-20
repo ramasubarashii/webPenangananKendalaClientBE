@@ -7,6 +7,7 @@ use App\Models\TicketAssignment;
 use App\Models\ProgressLog;
 use App\Models\User;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 
 class TicketController extends Controller
@@ -15,13 +16,17 @@ class TicketController extends Controller
     {
         $user = $request->user();
 
-        $query = Ticket::with(['creator', 'assignments.programmer', 'assignments.pm', 'progressLogs.user'])
+        $query = Ticket::with(['creator', 'claimedProgrammer', 'assignments.programmer', 'assignments.pm', 'progressLogs.user'])
             ->orderBy('created_at', 'desc');
 
         if ($user->role === 'programmer') {
-            // Programmers can only see tickets assigned to them
-            $query->whereHas('assignments', function ($q) use ($user) {
-                $q->where('programmer_id', $user->id);
+            // Programmers see tickets assigned to them OR tickets they have interacted with in logs
+            $query->where(function ($q) use ($user) {
+                $q->whereHas('assignments', function ($sq) use ($user) {
+                    $sq->where('programmer_id', $user->id);
+                })->orWhereHas('progressLogs', function ($sq) use ($user) {
+                    $sq->where('user_id', $user->id);
+                });
             });
         } elseif ($user->role === 'client') {
             // Clients can only see their own tickets
@@ -498,14 +503,15 @@ class TicketController extends Controller
         }
 
         $request->validate([
-            'status' => 'required|string|in:ESCALATED_TO_PM,escalated_to_pm',
             'internal_notes' => 'required|string',
-            'assigned_to_role' => 'required|string|in:PM,pm',
             'priority' => 'nullable|string|in:low,medium,high,Low,Medium,High,belum_ditentukan',
             'category' => 'nullable|string|in:Jaringan,Hardware,Software,Akun,Lainnya',
         ]);
 
         $oldStatus = $ticket->status;
+        // Workflow: SD escalates → status becomes escalated_to_pm
+        // The ticket is visible to PM AND also appears in Available Tickets for programmers.
+        // PM does NOT need to do anything to forward it.
         $updateData = [
             'status' => 'escalated_to_pm',
             'internal_notes' => $request->internal_notes,
@@ -527,12 +533,12 @@ class TicketController extends Controller
             'user_id' => $request->user()->id,
             'previous_status' => $oldStatus,
             'new_status' => 'escalated_to_pm',
-            'notes' => 'Eskalasi ke PM dengan catatan: ' . substr($request->internal_notes, 0, 100),
+            'notes' => 'Eskalasi tiket ke Project Manager dan pool programmer dengan catatan: ' . substr($request->internal_notes, 0, 100),
             'is_internal' => true,
         ]);
 
         return response()->json([
-            'message' => 'Tiket berhasil dieskalasikan ke PM.',
+            'message' => 'Tiket berhasil dieskalasikan ke Project Manager dan tersedia di Available Tickets programmer.',
             'ticket' => $ticket->load(['creator', 'assignments.programmer', 'assignments.pm', 'progressLogs'])
         ]);
     }
@@ -729,5 +735,276 @@ class TicketController extends Controller
             'message' => $msg,
             'ticket' => $ticket->load(['creator', 'assignments.programmer', 'assignments.pm', 'progressLogs.user'])
         ]);
+    }
+
+    /**
+     * PM: Release ticket to programmer claim pool.
+     * POST /tickets/{ticket}/release-for-claim
+     */
+    public function releaseForClaim(Request $request, $id)
+    {
+        if ($request->user()->role !== 'project_manager') {
+            return response()->json(['message' => 'Hanya Project Manager yang dapat merilis tiket untuk claim.'], 403);
+        }
+
+        $request->validate([
+            'notes' => 'required|string',
+        ]);
+
+        $ticket = Ticket::where('ticket_id', $id)->first();
+        if (! $ticket) {
+            return response()->json(['message' => 'Tiket tidak ditemukan'], 404);
+        }
+
+        if ($ticket->status !== 'escalated_to_pm') {
+            return response()->json([
+                'message' => 'Hanya tiket berstatus escalated_to_pm yang dapat dirilis untuk claim programmer.',
+            ], 422);
+        }
+
+        if (TicketAssignment::where('ticket_id', $ticket->id)->exists()) {
+            return response()->json(['message' => 'Tiket sudah memiliki assignment developer.'], 422);
+        }
+
+        $oldStatus = $ticket->status;
+        $ticket->update([
+            'status' => 'waiting_programmer',
+            'claimed_programmer_id' => null,
+        ]);
+
+        ProgressLog::create([
+            'ticket_id' => $ticket->id,
+            'user_id' => $request->user()->id,
+            'previous_status' => $oldStatus,
+            'new_status' => 'waiting_programmer',
+            'notes' => '[RELEASE_FOR_CLAIM] Tiket dirilis ke pool programmer untuk claim. Catatan PM: ' . $request->notes,
+            'is_internal' => true,
+        ]);
+
+        return response()->json([
+            'message' => 'Tiket berhasil dirilis ke Available Tickets untuk programmer.',
+            'ticket' => $ticket->load(['creator', 'claimedProgrammer', 'assignments.programmer', 'assignments.pm', 'progressLogs.user']),
+        ]);
+    }
+
+    /**
+     * Programmer: List tickets available for claim.
+     * GET /tickets/available
+     */
+    public function availableTickets(Request $request)
+    {
+        if ($request->user()->role !== 'programmer') {
+            return response()->json(['message' => 'Unauthorized.'], 403);
+        }
+
+        // Show tickets that are either escalated_to_pm or waiting_programmer,
+        // have no claimed programmer, and no assignment yet.
+        // This allows programmers to see tickets immediately after SD escalation
+        // without PM needing to take any action.
+        $tickets = Ticket::with(['creator', 'assignments', 'progressLogs.user'])
+            ->whereIn('status', ['escalated_to_pm', 'waiting_programmer'])
+            ->whereNull('claimed_programmer_id')
+            ->whereDoesntHave('assignments')
+            ->orderBy('created_at', 'desc')
+            ->get();
+
+        return response()->json($tickets);
+    }
+
+    /**
+     * Programmer: Claim a ticket (waiting_programmer → waiting_pm_approval).
+     * POST /tickets/{ticket}/claim
+     */
+    public function claimTicket(Request $request, $id)
+    {
+        if ($request->user()->role !== 'programmer') {
+            return response()->json(['message' => 'Hanya Programmer yang dapat claim tiket.'], 403);
+        }
+
+        $user = $request->user();
+
+        return DB::transaction(function () use ($id, $user) {
+            $ticket = Ticket::where('ticket_id', $id)->lockForUpdate()->first();
+
+            if (! $ticket) {
+                return response()->json(['message' => 'Tiket tidak ditemukan'], 404);
+            }
+
+            // Allow claim from both escalated_to_pm and waiting_programmer statuses
+            if (! in_array($ticket->status, ['escalated_to_pm', 'waiting_programmer'])) {
+                return response()->json(['message' => 'Tiket tidak tersedia untuk claim.'], 422);
+            }
+
+            if ($ticket->claimed_programmer_id) {
+                return response()->json(['message' => 'Tiket sudah di-claim programmer lain.'], 422);
+            }
+
+            if (TicketAssignment::where('ticket_id', $ticket->id)->exists()) {
+                return response()->json(['message' => 'Tiket sudah memiliki Assigned Developer.'], 422);
+            }
+
+            $oldStatus = $ticket->status;
+            $ticket->update([
+                'claimed_programmer_id' => $user->id,
+                'status' => 'waiting_pm_approval',
+            ]);
+
+            ProgressLog::create([
+                'ticket_id' => $ticket->id,
+                'user_id' => $user->id,
+                'previous_status' => $oldStatus,
+                'new_status' => 'waiting_pm_approval',
+                'notes' => '[CLAIM_TICKET] Programmer ' . $user->name . ' melakukan claim tiket. Menunggu persetujuan PM.',
+                'is_internal' => true,
+            ]);
+
+            return response()->json([
+                'message' => 'Claim berhasil diajukan. Menunggu persetujuan PM.',
+                'ticket' => $ticket->load(['creator', 'claimedProgrammer', 'assignments.programmer', 'assignments.pm', 'progressLogs.user']),
+            ]);
+        });
+    }
+
+    /**
+     * PM: List tickets with pending claim approval.
+     * GET /tickets/pending-claims
+     */
+    public function pendingClaimApprovals(Request $request)
+    {
+        if ($request->user()->role !== 'project_manager') {
+            return response()->json(['message' => 'Unauthorized.'], 403);
+        }
+
+        $tickets = Ticket::with(['creator', 'claimedProgrammer', 'assignments'])
+            ->where('status', 'waiting_pm_approval')
+            ->whereNotNull('claimed_programmer_id')
+            ->orderBy('updated_at', 'desc')
+            ->get();
+
+        return response()->json($tickets);
+    }
+
+    /**
+     * PM: Approve programmer claim → assigned.
+     * POST /tickets/{ticket}/approve-claim
+     */
+    public function approveClaim(Request $request, $id)
+    {
+        if ($request->user()->role !== 'project_manager') {
+            return response()->json(['message' => 'Hanya Project Manager yang dapat menyetujui claim.'], 403);
+        }
+
+        $request->validate([
+            'notes' => 'required|string',
+            'estimated_hours' => 'nullable|numeric|min:0.1',
+            'estimated_unit' => 'nullable|in:hours,days',
+        ]);
+
+        $pm = $request->user();
+
+        return DB::transaction(function () use ($id, $pm, $request) {
+            $ticket = Ticket::where('ticket_id', $id)->lockForUpdate()->first();
+
+            if (! $ticket) {
+                return response()->json(['message' => 'Tiket tidak ditemukan'], 404);
+            }
+
+            if ($ticket->status !== 'waiting_pm_approval' || ! $ticket->claimed_programmer_id) {
+                return response()->json(['message' => 'Tidak ada claim yang menunggu persetujuan pada tiket ini.'], 422);
+            }
+
+            if (TicketAssignment::where('ticket_id', $ticket->id)->exists()) {
+                return response()->json(['message' => 'Tiket sudah memiliki Assigned Developer.'], 422);
+            }
+
+            $programmer = User::find($ticket->claimed_programmer_id);
+            if (! $programmer || $programmer->role !== 'programmer') {
+                return response()->json(['message' => 'Programmer claim tidak valid.'], 422);
+            }
+
+            $unit = $request->estimated_unit ?? 'hours';
+            $estimatedHours = $request->estimated_hours ?? 0;
+            $unitLabel = $unit === 'days' ? 'Hari' : 'Jam';
+
+            TicketAssignment::create([
+                'ticket_id' => $ticket->id,
+                'pm_id' => $pm->id,
+                'programmer_id' => $programmer->id,
+                'estimated_hours' => $estimatedHours,
+                'estimated_unit' => $unit,
+            ]);
+
+            $oldStatus = $ticket->status;
+            $ticket->update([
+                'status' => 'assigned',
+                'claimed_programmer_id' => null,
+            ]);
+
+            ProgressLog::create([
+                'ticket_id' => $ticket->id,
+                'user_id' => $pm->id,
+                'previous_status' => $oldStatus,
+                'new_status' => 'assigned',
+                'notes' => '[CLAIM_APPROVED] Claim disetujui PM. Developer ditugaskan: ' . $programmer->name . '. Estimasi: ' . $estimatedHours . ' ' . $unitLabel . '. Catatan PM: ' . $request->notes,
+                'is_internal' => true,
+            ]);
+
+            return response()->json([
+                'message' => 'Claim disetujui. Tiket ditugaskan ke ' . $programmer->name . ' dan muncul di My Tasks.',
+                'ticket' => $ticket->load(['creator', 'claimedProgrammer', 'assignments.programmer', 'assignments.pm', 'progressLogs.user']),
+            ]);
+        });
+    }
+
+    /**
+     * PM: Reject programmer claim → waiting_programmer.
+     * POST /tickets/{ticket}/reject-claim
+     */
+    public function rejectClaim(Request $request, $id)
+    {
+        if ($request->user()->role !== 'project_manager') {
+            return response()->json(['message' => 'Hanya Project Manager yang dapat menolak claim.'], 403);
+        }
+
+        $request->validate([
+            'notes' => 'required|string',
+        ]);
+
+        $pm = $request->user();
+
+        return DB::transaction(function () use ($id, $pm, $request) {
+            $ticket = Ticket::where('ticket_id', $id)->lockForUpdate()->first();
+
+            if (! $ticket) {
+                return response()->json(['message' => 'Tiket tidak ditemukan'], 404);
+            }
+
+            if ($ticket->status !== 'waiting_pm_approval' || ! $ticket->claimed_programmer_id) {
+                return response()->json(['message' => 'Tidak ada claim yang menunggu persetujuan pada tiket ini.'], 422);
+            }
+
+            $programmer = User::find($ticket->claimed_programmer_id);
+            $programmerName = $programmer?->name ?? 'Unknown';
+
+            $oldStatus = $ticket->status;
+            $ticket->update([
+                'status' => 'waiting_programmer',
+                'claimed_programmer_id' => null,
+            ]);
+
+            ProgressLog::create([
+                'ticket_id' => $ticket->id,
+                'user_id' => $pm->id,
+                'previous_status' => $oldStatus,
+                'new_status' => 'waiting_programmer',
+                'notes' => '[CLAIM_REJECTED] Claim ditolak PM. Programmer ' . $programmerName . ' dibatalkan. Catatan PM: ' . $request->notes,
+                'is_internal' => true,
+            ]);
+
+            return response()->json([
+                'message' => 'Claim ditolak. Tiket kembali tersedia di Available Tickets.',
+                'ticket' => $ticket->load(['creator', 'claimedProgrammer', 'assignments.programmer', 'assignments.pm', 'progressLogs.user']),
+            ]);
+        });
     }
 }
