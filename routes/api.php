@@ -18,6 +18,10 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/tickets', [TicketController::class, 'index']);
     Route::post('/tickets', [TicketController::class, 'store'])->middleware('role:service_desk');
 
+    // Claim workflow — must be defined BEFORE /tickets/{ticket}
+    Route::get('/tickets/available', [TicketController::class, 'availableTickets'])->middleware('role:programmer');
+    Route::get('/tickets/pending-claims', [TicketController::class, 'pendingClaimApprovals'])->middleware('role:project_manager');
+
     // Walk-in Ticket (Service Desk creates ticket for non-registered client)
     // IMPORTANT: Must be defined BEFORE /tickets/{ticket} to avoid route param conflict
     Route::post('/tickets/walk-in', [TicketController::class, 'storeWalkIn'])->middleware('role:service_desk');
@@ -33,6 +37,12 @@ Route::middleware('auth:sanctum')->group(function () {
     
     // Assign Ticket (PM Only)
     Route::post('/tickets/{ticket}/assign', [TicketController::class, 'assign'])->middleware('role:project_manager');
+
+    // Claim workflow actions
+    Route::post('/tickets/{ticket}/release-for-claim', [TicketController::class, 'releaseForClaim'])->middleware('role:project_manager');
+    Route::post('/tickets/{ticket}/claim', [TicketController::class, 'claimTicket'])->middleware('role:programmer');
+    Route::post('/tickets/{ticket}/approve-claim', [TicketController::class, 'approveClaim'])->middleware('role:project_manager');
+    Route::post('/tickets/{ticket}/reject-claim', [TicketController::class, 'rejectClaim'])->middleware('role:project_manager');
 
     // Escalate Ticket (Service Desk Only)
     Route::match(['post', 'put', 'patch'], '/tickets/{ticket}/escalate', [TicketController::class, 'escalate'])->middleware('role:service_desk');

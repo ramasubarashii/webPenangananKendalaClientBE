@@ -15,6 +15,7 @@ class Ticket extends Model
         'category',
         'priority',
         'user_id',
+        'claimed_programmer_id',
         'internal_notes',
         'assigned_to_role',
         // Walk-in / non-user reporter fields
@@ -57,6 +58,11 @@ class Ticket extends Model
     public function creator()
     {
         return $this->belongsTo(User::class, 'user_id');
+    }
+
+    public function claimedProgrammer()
+    {
+        return $this->belongsTo(User::class, 'claimed_programmer_id');
     }
 
     public function assignments()
