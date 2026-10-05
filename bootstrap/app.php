@@ -1,5 +1,7 @@
 <?php
 
+require_once __DIR__.'/dom_polyfill.php';
+
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;

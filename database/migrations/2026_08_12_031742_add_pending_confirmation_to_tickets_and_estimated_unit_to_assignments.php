@@ -15,18 +15,20 @@ return new class extends Migration
     public function up(): void
     {
         // 1. Add pending_confirmation to tickets status enum
-        DB::statement("ALTER TABLE tickets MODIFY COLUMN status ENUM(
-            'pending_confirmation',
-            'open',
-            'escalated_to_pm',
-            'assigned',
-            'in_progress',
-            'pending_review',
-            'escalated_to_owner',
-            'resolved',
-            'closed',
-            'rejected'
-        ) NOT NULL DEFAULT 'open'");
+        if (DB::getDriverName() !== 'sqlite') {
+            DB::statement("ALTER TABLE tickets MODIFY COLUMN status ENUM(
+                'pending_confirmation',
+                'open',
+                'escalated_to_pm',
+                'assigned',
+                'in_progress',
+                'pending_review',
+                'escalated_to_owner',
+                'resolved',
+                'closed',
+                'rejected'
+            ) NOT NULL DEFAULT 'open'");
+        }
 
         // 2. Add estimated_unit to ticket_assignments (default 'hours' = backward compatible)
         Schema::table('ticket_assignments', function (Blueprint $table) {
@@ -45,16 +47,18 @@ return new class extends Migration
         });
 
         // Remove pending_confirmation from enum
-        DB::statement("ALTER TABLE tickets MODIFY COLUMN status ENUM(
-            'open',
-            'escalated_to_pm',
-            'assigned',
-            'in_progress',
-            'pending_review',
-            'escalated_to_owner',
-            'resolved',
-            'closed',
-            'rejected'
-        ) NOT NULL DEFAULT 'open'");
+        if (DB::getDriverName() !== 'sqlite') {
+            DB::statement("ALTER TABLE tickets MODIFY COLUMN status ENUM(
+                'open',
+                'escalated_to_pm',
+                'assigned',
+                'in_progress',
+                'pending_review',
+                'escalated_to_owner',
+                'resolved',
+                'closed',
+                'rejected'
+            ) NOT NULL DEFAULT 'open'");
+        }
     }
 };

@@ -12,6 +12,10 @@ return new class extends Migration
      */
     public function up(): void
     {
+        if (DB::getDriverName() === 'sqlite') {
+            return;
+        }
+
         // MySQL requires ALTER TABLE to modify enum columns
         DB::statement("ALTER TABLE tickets MODIFY COLUMN status ENUM(
             'open',
@@ -32,6 +36,10 @@ return new class extends Migration
      */
     public function down(): void
     {
+        if (DB::getDriverName() === 'sqlite') {
+            return;
+        }
+
         DB::statement("ALTER TABLE tickets MODIFY COLUMN status ENUM(
             'open',
             'escalated_to_pm',

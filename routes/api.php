@@ -5,10 +5,12 @@ use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\AuthController;
 use App\Http\Controllers\TicketController;
 use App\Http\Controllers\AdminController;
+use App\Http\Controllers\PushSubscriptionController;
 use App\Models\User;
 
 // Public Auth Routes
 Route::post('/login', [AuthController::class, 'login']);
+Route::get('/vapid-public-key', [PushSubscriptionController::class, 'getPublicKey']);
 
 // Public: Forgot Password (Client self-service via email with rate limiting)
 Route::post('/forgot-password', [AuthController::class, 'forgotPassword'])->middleware('throttle:5,1');
@@ -20,6 +22,10 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/me', [AuthController::class, 'me']);
     Route::put('/profile', [AuthController::class, 'updateProfile']);
     Route::put('/profile/password', [AuthController::class, 'updatePassword']);
+
+    // Web Push Subscriptions (Phase 3)
+    Route::post('/push-subscriptions', [PushSubscriptionController::class, 'subscribe']);
+    Route::post('/send-test-push', [PushSubscriptionController::class, 'sendTestPush']);
 
     // Tickets routes
     Route::get('/tickets', [TicketController::class, 'index']);

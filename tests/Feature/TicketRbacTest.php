@@ -337,32 +337,39 @@ class TicketRbacTest extends TestCase
 
     public function test_pm_review_ok_and_not_ok()
     {
-        $ticket = Ticket::create([
-            'title' => 'Feature Implementation',
+        // 1. PM Reviews TIDAK OK -> status reverts to in_progress
+        $ticket1 = Ticket::create([
+            'title' => 'Feature Implementation 1',
             'description' => 'Need testing',
-            'status' => 'resolved',
+            'status' => 'pending_review',
             'user_id' => $this->clientUser->id
         ]);
 
-        // 1. PM Reviews TIDAK OK -> status reverts to in_progress
         $notOkResponse = $this->actingAs($this->pm)
-            ->postJson("/api/tickets/{$ticket->ticket_id}/pm-review", [
+            ->postJson("/api/tickets/{$ticket1->ticket_id}/pm-review", [
                 'decision' => 'not_ok',
                 'notes' => 'Bug found in login form',
             ]);
 
         $notOkResponse->assertStatus(200);
-        $this->assertEquals('in_progress', $ticket->fresh()->status);
+        $this->assertEquals('in_progress', $ticket1->fresh()->status);
 
-        // 2. PM Reviews OK -> status remains resolved
+        // 2. PM Reviews OK -> status becomes resolved
+        $ticket2 = Ticket::create([
+            'title' => 'Feature Implementation 2',
+            'description' => 'Need testing',
+            'status' => 'pending_review',
+            'user_id' => $this->clientUser->id
+        ]);
+
         $okResponse = $this->actingAs($this->pm)
-            ->postJson("/api/tickets/{$ticket->ticket_id}/pm-review", [
+            ->postJson("/api/tickets/{$ticket2->ticket_id}/pm-review", [
                 'decision' => 'ok',
                 'notes' => 'Fix verified cleanly',
             ]);
 
         $okResponse->assertStatus(200);
-        $this->assertEquals('resolved', $ticket->fresh()->status);
+        $this->assertEquals('resolved', $ticket2->fresh()->status);
     }
 
     public function test_pm_escalate_to_owner_and_owner_decision()
